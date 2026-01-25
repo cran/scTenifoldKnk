@@ -1,11 +1,15 @@
 scTenifoldKnk
 =============
 
-A R/MATLAB package to perform virtual knockout experiments on single-cell gene regulatory networks. **scTenifoldKnk** is a machine learning workflow that performs virtual knockout experiments using single-cell RNA sequencing (scRNAseq) data from wild-type (WT) control samples as input. Constructs a single-cell gene regulatory network (scGRN) and knocks out a target gene from the adjacency matrix of the WT scGRN by setting the gene’s outdegree edges to zero. **scTenifoldKnk** then compares the knocked out scGRN with the WT scGRN to identify differentially regulated genes, called virtual-knockout perturbed genes, which are used to assess the impact of the gene knockout and reveal the gene’s function in the analyzed cells.
+A R/MATLAB/Python package to perform virtual knockout experiments on single-cell gene regulatory networks. **scTenifoldKnk** is a machine learning workflow that performs virtual knockout experiments using single-cell RNA sequencing (scRNAseq) data from wild-type (WT) control samples as input. Constructs a single-cell gene regulatory network (scGRN) and knocks out a target gene from the adjacency matrix of the WT scGRN by setting the gene’s outdegree edges to zero. **scTenifoldKnk** then compares the knocked out scGRN with the WT scGRN to identify differentially regulated genes, called virtual-knockout perturbed genes, which are used to assess the impact of the gene knockout and reveal the gene’s function in the analyzed cells.
+
+Python version of scTenifoldKnk is available at: https://github.com/qwerty239qwe/scTenifoldpy
+
+MATLAB version is available at: https://github.com/jamesjcai/scGEAToolbox
 
 Install:
 -------
-This package is under active development, you can install **scTenifoldKnk**, using the following command:
+You can install **scTenifoldKnk/R** using the following command:
 
 ```{R}
 library(remotes)
@@ -22,7 +26,7 @@ Available functions:
 
 Input:
 --------
-The required input for **scTenifoldKnk** is an expression matrix with genes in the rows and cells (barcodes) in the columns. Data is expected to be _not normalized_.
+The required input for **scTenifoldKnk** is an expression matrix with genes in the rows and cells (barcodes) in the columns. Data is expected to be previously normalized or _not normalized_ if `QC = TRUE`.
 
 Running time:
 --------
@@ -54,3 +58,9 @@ The output of **scTenifoldKnk** is a list with 3 slots as follows:
     * **FC**: A numeric vector of the FC computed with respect to the expectation.
     * **p.value**: A numeric vector of the p-values associated to the fold-changes, probabilities are asigned as P[X > x] using the Chi-square distribution with one degree of freedom.
     * **p.adj**: A numeric vector of adjusted p-values using Benjamini & Hochberg (1995) FDR correction.
+
+---
+The function to plot the egocentric KO, the code is available at [https://github.com/dosorio/utilities/blob/master/singleCell/plotKO.R](https://github.com/dosorio/utilities/blob/master/singleCell/plotKO.R), it requires: The object out of Knk (as X), the gene to knockout (gKO).
+
+
+©️ The Texas A & M University System. All rights reserved.
