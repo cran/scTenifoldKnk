@@ -2,12 +2,12 @@ Package: scTenifoldKnk
 Type: Package
 Title: In-Silico Knockout Experiments from Single-Cell Gene Regulatory
         Networks
-Version: 1.0.3
+Version: 1.1
 Authors@R: c(person(given = "Daniel", family = "Osorio", email = "dcosorioh@gmail.com", role = c("aut","cre"), comment = c(ORCID = '0000-0003-4424-8422')),
               person(given = "Yan", family = "Zhong", role = c("aut","ctb")),
               person(given = "Guanxun", family = "Li", role = c("aut","ctb")),
               person(given = "Qian", family = "Xu", role = c("aut","ctb")),
-              person(given = "Yongjuan", family = "Yang", role = c("aut","ctb")),
+              person(given = "Yongjian", family = "Yang", role = c("aut","ctb")),
               person(given = "Yanan", family = "Tian", role = c("aut","ctb")),
               person(given = "Robert", family = "Chapkin", role = c("aut","ctb")),
               person(given = "Jianhua", family = "Huang", role = c("aut","ctb")),
@@ -20,17 +20,17 @@ License: GPL (>= 2)
 Encoding: UTF-8
 RoxygenNote: 7.3.3
 biocViews:
-Imports: pbapply, Matrix, methods, stats, utils, MASS, scTenifoldNet,
-        cli, enrichR, igraph, reshape2
-Suggests: testthat (>= 2.1.0)
+Imports: Matrix, methods, stats, MASS, scTenifoldNet (>= 1.4), cli,
+        enrichR, igraph, reshape2, grDevices
+Suggests: testthat (>= 2.1.0), locfdr
 NeedsCompilation: no
-Packaged: 2026-01-19 22:08:00 UTC; dcosorioh
+Packaged: 2026-09-02 16:22:43 UTC; dcosorioh
 Author: Daniel Osorio [aut, cre] (ORCID:
     <https://orcid.org/0000-0003-4424-8422>),
   Yan Zhong [aut, ctb],
   Guanxun Li [aut, ctb],
   Qian Xu [aut, ctb],
-  Yongjuan Yang [aut, ctb],
+  Yongjian Yang [aut, ctb],
   Yanan Tian [aut, ctb],
   Robert Chapkin [aut, ctb],
   Jianhua Huang [aut, ctb],
@@ -38,4 +38,4 @@ Author: Daniel Osorio [aut, cre] (ORCID:
     <https://orcid.org/0000-0002-8081-6725>)
 Maintainer: Daniel Osorio <dcosorioh@gmail.com>
 Repository: CRAN
-Date/Publication: 2026-01-25 22:00:02 UTC
+Date/Publication: 2026-09-02 17:20:02 UTC

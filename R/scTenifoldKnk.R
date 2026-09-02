@@ -1,16 +1,20 @@
 #' @export scTenifoldKnk
-#' @importFrom Matrix Matrix rowMeans rowSums
-#' @import cli
-#' @importFrom scTenifoldNet makeNetworks tensorDecomposition manifoldAlignment
-#' @author Daniel Osorio <dcosorioh@tamu.edu>
+#' @importFrom methods as
+#' @importFrom cli cli_h1 cli_alert_info cli_alert_success
+#' @importFrom Matrix Matrix
+#' @importFrom scTenifoldNet makeNetworks tensorDecomposition manifoldAlignment cpmNormalization
+#' @author Daniel Osorio <dcosorioh@gmail.com>
 #' @title scTenifoldKNK
-#' @description Predict gene perturbations
-#' @param countMatrix countMatrix
-#' @param gKO gKO
+#' @description Predict gene perturbations using in-silico knockout experiments
+#'   from single-cell gene regulatory networks.
+#' @param countMatrix Raw counts matrix with cells as columns and genes (symbols) as rows.
+#' @param gKO Character. In single knockout mode, the gene symbol of the gene to knock out. In transcriptome-wide mode (\code{transcriptomeWide = TRUE}), an optional character vector defining the subset of genes to perturb; if \code{NULL}, every gene in the WT network is perturbed.
+#' @param transcriptomeWide A boolean value (TRUE/FALSE). If TRUE, the WT network is built once and each target gene is knocked out in turn, returning the manifold-alignment distances for every perturbation. Default: FALSE.
 #' @param qc A boolean value (TRUE/FALSE), if TRUE, a quality control is applied over the data.
-#' @param qc_minLSize An integer value. Defines the minimum library size required for a cell to be included in the analysis.
-#' @param qc_mtThreshold A decimal value between 0 and 1. Defines the maximum ratio of mitochondrial reads (mithocondrial reads / library size) present in a cell to be included in the analysis. It's computed using the symbol genes starting with 'MT-' non-case sensitive.
-#' @param qc_minCells An integer value. Defines the minimum number of cells a gene should be expressed in to be included in the analysis. By default, it's set to 25.
+#' @param qc_minLibSize An integer value. Defines the minimum library size required for a cell to be included in the analysis.
+#' @param qc_removeOutlierCells A boolean value (TRUE/FALSE), if TRUE, cells with library size identified as outliers are removed. For further details see: \code{?boxplot.stats}
+#' @param qc_minPCT A decimal value between 0 and 1. Defines the minimum fraction of cells where the gene needs to be expressed to be included in the analysis.
+#' @param qc_maxMTratio A decimal value between 0 and 1. Defines the maximum ratio of mitochondrial reads (mitochondrial reads / library size) present in a cell to be included in the analysis. It's computed using the symbol genes starting with 'MT-' non-case sensitive.
 #' @param nc_nNet An integer value. The number of networks based on principal components regression to generate.
 #' @param nc_nCells An integer value. The number of cells to subsample each time to generate a network.
 #' @param nc_nComp An integer value. The number of principal components in PCA to generate the networks. Should be greater than 2 and lower than the total number of genes.
@@ -18,87 +22,225 @@
 #' @param nc_scaleScores A boolean value (TRUE/FALSE), if TRUE, the weights will be normalized such that the maximum absolute value is 1.
 #' @param nc_lambda A continuous value between 0 and 1. Defines the multiplicative value (1-lambda) to be applied over the weaker edge connecting two genes to maximize the adjacency matrix directionality.
 #' @param nc_q A decimal value between 0 and 1. Defines the cut-off threshold of top q\% relationships to be returned.
+#' @param nc_priorNetwork A data.frame containing a prior gene regulatory network. The data.frame must have two columns: `regulators` and `targets`. Default: NULL.
 #' @param td_K An integer value. Defines the number of rank-one tensors used to approximate the data using CANDECOMP/PARAFAC (CP) Tensor Decomposition.
 #' @param td_maxIter An integer value. Defines the maximum number of iterations if error stay above \code{td_maxError}.
 #' @param td_maxError A decimal value between 0 and 1. Defines the relative Frobenius norm error tolerance.
 #' @param td_nDecimal An integer value indicating the number of decimal places to be used.
 #' @param ma_nDim An integer value. Defines the number of dimensions of the low-dimensional feature space to be returned from the non-linear manifold alignment.
+#' @param dr_empiricalNull A boolean value (TRUE/FALSE). If TRUE, the differential regulation p-values are assigned using Efron's empirical null (estimated with \code{locfdr}) instead of the theoretical chi-square null. Requires the \code{locfdr} package. Default: FALSE.
 #' @param nCores An integer value. Defines the number of cores to be used.
+#' @return In single knockout mode (\code{transcriptomeWide = FALSE}), a list with 3 slots as follows:
+#' \itemize{
+#' \item{tensorNetworks:} The WT and KO weight-averaged denoised gene regulatory networks.
+#' \item{manifoldAlignment:} The generated low-dimensional features result of the non-linear manifold alignment.
+#' \item{diffRegulation:} The results of the differential regulation analysis.
+#' }
+#' In transcriptome-wide mode (\code{transcriptomeWide = TRUE}), a list with 2 slots as follows:
+#' \itemize{
+#' \item{tensorNetworks:} A list with the WT weight-averaged denoised gene regulatory network.
+#' \item{perturbationDistances:} A numeric matrix of manifold-alignment distances with the perturbed genes as rows and all genes in the WT network as columns.
+#' }
 #' @examples
-#' # Loading single-cell data
-#' scRNAseq <- system.file("single-cell/example.csv", package = "scTenifoldKnk")
-#' scRNAseq <- read.csv(scRNAseq, row.names = 1)
+#' library(scTenifoldKnk)
 #'
-#' # Running scTenifoldKnk
-#' scTenifoldKnk(countMatrix = scRNAseq, gKO = "G100", qc_minLSize = 0)
-scTenifoldKnk <- function(countMatrix, qc = TRUE, gKO = NULL, qc_mtThreshold = 0.1, qc_minLSize = 1000, qc_minCells = 25, nc_lambda = 0, nc_nNet = 10, nc_nCells = 500, nc_nComp = 3,
-                          nc_scaleScores = TRUE, nc_symmetric = FALSE, nc_q = 0.9, td_K = 3, td_maxIter = 1000,
-                          td_maxError = 1e-05, td_nDecimal = 3, ma_nDim = 2, nCores = parallel::detectCores()) {
-  
-  # Start a CLI process to report progress to the user
-  cli::cli_h1("scTenifoldKnk")
-  cli::cli_alert_info("Simulating {gKO} gene knockout")
+#' # Simulating a dataset following a negative binomial distribution with high sparsity (~67%)
+#' nCells = 2000
+#' nGenes = 100
+#' set.seed(1)
+#' X <- rnbinom(n = nGenes * nCells, size = 20, prob = 0.98)
+#' X <- round(X)
+#' X <- matrix(X, ncol = nCells)
+#' rownames(X) <- c(paste0('ng', 1:90), paste0('mt-', 1:10))
+#'
+#' \dontrun{
+#' # Running scTenifoldKnk — simulating knockout of gene ng10
+#' output <- scTenifoldKnk(
+#'   countMatrix = X,
+#'   gKO = "ng10",
+#'   nc_nNet = 10,
+#'   nc_nCells = 500,
+#'   td_K = 3,
+#'   qc_minLibSize = 30
+#' )
+#'
+#' # Structure of the output
+#' str(output)
+#'
+#' # Accessing the WT and KO gene regulatory networks
+#' dim(output$tensorNetworks$WT)
+#' dim(output$tensorNetworks$KO)
+#'
+#' # Accessing the manifold alignment result
+#' head(output$manifoldAlignment)
+#'
+#' # Differential regulation results — top perturbed genes
+#' head(output$diffRegulation, n = 10)
+#'
+#' # Plotting the KO-centered subnetwork
+#' plotKO(output, gKO = "ng10")
+#'
+#' # Transcriptome-wide perturbation — knock out every gene in the WT network
+#' twOutput <- scTenifoldKnk(
+#'   countMatrix = X,
+#'   transcriptomeWide = TRUE,
+#'   nc_nNet = 10,
+#'   nc_nCells = 500,
+#'   td_K = 3,
+#'   qc_minLibSize = 30
+#' )
+#'
+#' # Matrix of distances: perturbed genes (rows) by all genes (columns)
+#' dim(twOutput$perturbationDistances)
+#' twOutput$perturbationDistances[1:5, 1:5]
+#' }
+scTenifoldKnk <- function(countMatrix, gKO = NULL, transcriptomeWide = FALSE,
+                          qc = TRUE,
+                          qc_minLibSize = 1000, qc_removeOutlierCells = TRUE,
+                          qc_minPCT = 0.05, qc_maxMTratio = 0.1,
+                          nc_lambda = 0, nc_nNet = 10, nc_nCells = 500,
+                          nc_nComp = 3, nc_scaleScores = TRUE,
+                          nc_symmetric = FALSE, nc_q = 0.9,
+                          nc_priorNetwork = NULL, td_K = 3,
+                          td_maxIter = 1000, td_maxError = 1e-05,
+                          td_nDecimal = 3, ma_nDim = 2,
+                          dr_empiricalNull = FALSE,
+                          nCores = parallel::detectCores()) {
 
-  # Check that the requested gene to knock out is present in the input matrix
-  if (!gKO %in% rownames(countMatrix)) {
-    cli::cli_alert_danger("{gKO} is not present in the count matrix used as input")
-    cli::cli_abort("{gKO} is not present in the count matrix used as input")
+  cli::cli_h1("scTenifoldKnk Pipeline")
+
+  if (isTRUE(transcriptomeWide)) {
+    # A subset is optional; when provided it must be present in the input matrix
+    if (!is.null(gKO)) {
+      if (!is.character(gKO) || anyNA(gKO)) {
+        stop("'gKO' must be a character vector of gene symbols to perturb")
+      }
+      missingGenes <- gKO[!gKO %in% rownames(countMatrix)]
+      if (length(missingGenes) > 0) {
+        stop("The following genes are not present in the count matrix used as input: ",
+             paste(missingGenes, collapse = ", "))
+      }
+    }
+  } else {
+    # A single gene symbol to knock out must be provided
+    if (is.null(gKO) || length(gKO) != 1 || is.na(gKO)) {
+      stop("A single gene symbol must be provided in 'gKO' to perform the knockout")
+    }
+
+    # Check that the requested gene to knock out is present in the input matrix
+    if (!gKO %in% rownames(countMatrix)) {
+      stop(gKO, " is not present in the count matrix used as input")
+    }
   }
 
-  # Optional quality control: filter cells and genes
+  # Step 1: Quality Control
   if (isTRUE(qc)) {
-    # Remove low-quality cells (using mitochondrial ratio and library size)
-    countMatrix <- scQC(countMatrix, mtThreshold = qc_mtThreshold, minLSize = qc_minLSize)
-    # Keep genes expressed in at least `qc_minCells` cells (row subset)
-    countMatrix[rowSums(countMatrix != 0) >= qc_minCells, ]
-    # Report QC results
-    cli::cli_alert_success("Count matrix quality control applied: retained {nrow(countMatrix)} genes and {ncol(countMatrix)} cells")
+    cli::cli_alert_info("Step 1/7: Quality control")
+    countMatrix <- scQC(countMatrix, minLibSize = qc_minLibSize,
+                        removeOutlierCells = qc_removeOutlierCells,
+                        minPCT = qc_minPCT, maxMTratio = qc_maxMTratio)
   }
 
-  # Re-check presence of the KO gene after filtering
-  if (!gKO %in% rownames(countMatrix)) {
-    cli::cli_alert_danger("{gKO} is not present in the count matrix after count matrix quality control")
-    cli::cli_abort("{gKO} is not present in the count matrix after count matrix quality control")
+  # Re-check presence of the KO gene(s) after filtering
+  if (isTRUE(transcriptomeWide)) {
+    if (!is.null(gKO)) {
+      missingGenes <- gKO[!gKO %in% rownames(countMatrix)]
+      if (length(missingGenes) > 0) {
+        stop("The following genes are not present in the count matrix after quality control: ",
+             paste(missingGenes, collapse = ", "))
+      }
+    }
+  } else if (!gKO %in% rownames(countMatrix)) {
+    stop(gKO, " is not present in the count matrix after quality control")
   }
 
-  # Build an ensemble of gene regulatory networks (subsample cells, use PCR)
-  WT <- scTenifoldNet::makeNetworks(X = countMatrix, q = nc_q, nNet = nc_nNet, nCells = nc_nCells, scaleScores = nc_scaleScores, symmetric = nc_symmetric, nComp = nc_nComp, nCores = nCores)
-  cli::cli_alert_success("Network construction complete (nNet = {nc_nNet}, nCells per net = {nc_nCells})")
+  # Step 2: CPM Normalization
+  cli::cli_alert_info("Step 2/7: CPM normalization")
+  countMatrix <- cpmNormalization(countMatrix)
 
-  # Tensor decomposition (CP) to denoise / approximate the ensemble of networks
-  WT <- scTenifoldNet::tensorDecomposition(xList = WT, K = td_K, maxError = td_maxError, maxIter = td_maxIter, nDecimal = td_nDecimal)
-  cli::cli_alert_success("Tensor decomposition completed (K = {td_K})")
+  # Step 3: Network construction
+  cli::cli_alert_info("Step 3/7: Building gene regulatory networks")
+  set.seed(1)
+  WT <- makeNetworks(X = countMatrix, q = nc_q,
+                     priorNetwork = nc_priorNetwork, nNet = nc_nNet,
+                     nCells = nc_nCells, scaleScores = nc_scaleScores,
+                     symmetric = nc_symmetric, nComp = nc_nComp,
+                     nCores = nCores)
 
-  # Extract reconstructed network and enforce directionality
+  # Step 4: Tensor decomposition
+  cli::cli_alert_info("Step 4/7: Tensor decomposition")
+  set.seed(1)
+  WT <- tensorDecomposition(xList = WT, K = td_K, maxError = td_maxError,
+                            maxIter = td_maxIter, nDecimal = td_nDecimal)
+
+  # Extract reconstructed network, enforce directionality
   WT <- WT$X
   WT <- strictDirection(WT, lambda = nc_lambda)
   WT <- as.matrix(WT)
-  # Remove self-loops
   diag(WT) <- 0
-  # Transpose to have genes as rows for downstream steps
   WT <- t(WT)
-  cli::cli_alert_success("Prepared WT adjacency matrix for KO simulation")
 
-  # Simulate knockout by zeroing outgoing edges from the KO gene
+  if (isTRUE(transcriptomeWide)) {
+    # Transcriptome-wide mode: perturb each target gene in the WT network
+    geneList <- rownames(WT)
+    targetGenes <- if (is.null(gKO)) geneList else gKO
+
+    # Some subset genes may be dropped during network construction
+    missingGenes <- targetGenes[!targetGenes %in% geneList]
+    if (length(missingGenes) > 0) {
+      stop("The following genes are not present in the WT network: ",
+           paste(missingGenes, collapse = ", "))
+    }
+
+    cli::cli_alert_info(
+      "Step 5/5: Perturbing {length(targetGenes)} gene{?s} transcriptome-wide"
+    )
+
+    perturbationDistances <- matrix(
+      NA_real_, nrow = length(targetGenes), ncol = length(geneList),
+      dimnames = list(targetGenes, geneList)
+    )
+
+    cli::cli_progress_bar("Perturbing genes", total = length(targetGenes))
+    for (g in targetGenes) {
+      KO <- WT
+      KO[g, ] <- 0
+      set.seed(1)
+      MA <- manifoldAlignment(WT, KO, d = ma_nDim, nCores = nCores)
+      DR <- dRegulation(MA, empiricalNull = dr_empiricalNull)
+      perturbationDistances[g, DR$gene] <- DR$distance
+      cli::cli_progress_update()
+    }
+    cli::cli_progress_done()
+
+    outputList <- list()
+    outputList$tensorNetworks$WT <- Matrix(WT)
+    outputList$perturbationDistances <- perturbationDistances
+
+    cli::cli_alert_success("scTenifoldKnk pipeline complete")
+    return(outputList)
+  }
+
+  # Step 5: Simulate knockout by zeroing outgoing edges from the KO gene
+  cli::cli_alert_info("Step 5/7: Simulating {gKO} knockout")
   KO <- WT
   KO[gKO, ] <- 0
-  cli::cli_alert_success("Simulated knockout for {gKO}")
 
-  # Align WT and KO networks into a shared low-dimensional manifold space
+  # Step 6: Manifold alignment
+  cli::cli_alert_info("Step 6/7: Manifold alignment")
+  set.seed(1)
   MA <- manifoldAlignment(WT, KO, d = ma_nDim, nCores = nCores)
-  cli::cli_alert_success("Manifold alignment completed (d = {ma_nDim})")
 
-  # Compute differential regulation for the KO gene from the aligned manifolds
-  DR <- dRegulation(MA, gKO)
-  cli::cli_alert_success("Differential regulation computed for {gKO}")
+  # Step 7: Differential regulation analysis
+  cli::cli_alert_info("Step 7/7: Differential regulation analysis")
+  DR <- dRegulation(MA, empiricalNull = dr_empiricalNull)
 
-  # Prepare and return results
   outputList <- list()
   outputList$tensorNetworks$WT <- Matrix(WT)
   outputList$tensorNetworks$KO <- Matrix(KO)
   outputList$manifoldAlignment <- MA
   outputList$diffRegulation <- DR
-  # Finish CLI process and return results
-  cli::cli_alert_success("Finished scTenifoldKnk for {gKO}")
+
+  cli::cli_alert_success("scTenifoldKnk pipeline complete")
   return(outputList)
 }
