@@ -26,14 +26,20 @@ scTenifoldKnk(
   td_maxError = 1e-05,
   td_nDecimal = 3,
   ma_nDim = 2,
+  ma_method = NULL,
+  ma_heatT = 10,
   dr_empiricalNull = FALSE,
-  nCores = parallel::detectCores()
+  dr_direction = TRUE,
+  dr_directionT = 5,
+  dr_directionRegressLibSize = FALSE,
+  nCores = parallel::detectCores(),
+  seed = 1
 )
 }
 \arguments{
-\item{countMatrix}{Raw counts matrix with cells as columns and genes (symbols) as rows.}
+\item{countMatrix}{Raw counts matrix with cells as columns and genes (symbols) as rows, as a \code{matrix} or a sparse \code{dgCMatrix}. A data.frame is not accepted; convert it with \code{as.matrix()} first.}
 
-\item{gKO}{Character. In single knockout mode, the gene symbol of the gene to knock out. In transcriptome-wide mode (\code{transcriptomeWide = TRUE}), an optional character vector defining the subset of genes to perturb; if \code{NULL}, every gene in the WT network is perturbed.}
+\item{gKO}{Character. In knockout mode (\code{transcriptomeWide = FALSE}), the gene symbol of the gene to knock out, or a character vector of several genes to knock out together in a single simulated experiment (e.g. \code{c("Hnf4a", "Hnf4g")}). In transcriptome-wide mode (\code{transcriptomeWide = TRUE}), an optional character vector defining the subset of genes to perturb, each one knocked out separately; if \code{NULL}, every gene in the WT network is perturbed.}
 
 \item{transcriptomeWide}{A boolean value (TRUE/FALSE). If TRUE, the WT network is built once and each target gene is knocked out in turn, returning the manifold-alignment distances for every perturbation. Default: FALSE.}
 
@@ -73,21 +79,34 @@ scTenifoldKnk(
 
 \item{ma_nDim}{An integer value. Defines the number of dimensions of the low-dimensional feature space to be returned from the non-linear manifold alignment.}
 
+\item{ma_method}{Character, \code{"manifold"} or \code{"heat"}. How the WT and KO networks are compared: \code{"manifold"} runs the non-linear manifold alignment for each knockout; \code{"heat"} uses the heat manifold alignment (\code{\link{hkManifoldAlignment}}), which computes the heat kernel of the WT network once and reads every knockout from it. If \code{NULL} (default), \code{"manifold"} is used for single and multi-gene knockouts and \code{"heat"} when \code{transcriptomeWide = TRUE}.}
+
+\item{ma_heatT}{A non-negative number. Diffusion time of the heat kernel used when \code{ma_method = "heat"}. Default: 10.}
+
 \item{dr_empiricalNull}{A boolean value (TRUE/FALSE). If TRUE, the differential regulation p-values are assigned using Efron's empirical null (estimated with \code{locfdr}) instead of the theoretical chi-square null. Requires the \code{locfdr} package. Default: FALSE.}
 
+\item{dr_direction}{A boolean value (TRUE/FALSE). If TRUE, the predicted direction of the change of each gene (up/down) is added to the output, computed from the WT expression with \code{\link{knockoutDirection}}. Default: TRUE.}
+
+\item{dr_directionT}{A non-negative number. Diffusion time of the correlation heat kernel used to predict the direction. Default: 5.}
+
+\item{dr_directionRegressLibSize}{A boolean value (TRUE/FALSE). If TRUE, the log library size is regressed out of each gene's expression before computing the gene-gene correlations used to predict the direction (see \code{\link{knockoutDirection}}); consider it when nearly all genes are predicted down. Default: FALSE.}
+
 \item{nCores}{An integer value. Defines the number of cores to be used.}
+
+\item{seed}{An integer value. The RNG is set to this seed before each random stage (network construction, tensor decomposition and manifold alignment), so results are reproducible and independent of the caller's RNG state; the caller's RNG state is restored on exit. Use different values to assess run-to-run variability. If \code{NULL}, the RNG is never reseeded and the caller's RNG state (e.g. a previous \code{set.seed()}) drives all random stages. Default: 1.}
 }
 \value{
 In single knockout mode (\code{transcriptomeWide = FALSE}), a list with 3 slots as follows:
 \itemize{
-\item{tensorNetworks:} The WT and KO weight-averaged denoised gene regulatory networks.
-\item{manifoldAlignment:} The generated low-dimensional features result of the non-linear manifold alignment.
-\item{diffRegulation:} The results of the differential regulation analysis.
+\item{tensorNetworks:} A list with the WT weight-averaged denoised gene regulatory network. The KO network is the WT network with the rows of \code{gKO} set to 0; it is not returned, which roughly halves the size of the output.
+\item{manifoldAlignment:} The generated low-dimensional features result of the non-linear manifold alignment (only when \code{ma_method = "manifold"}).
+\item{diffRegulation:} The results of the differential regulation analysis (see \code{\link{dRegulation}}), including the \code{direction} and \code{directionScore} columns when \code{dr_direction = TRUE}.
 }
 In transcriptome-wide mode (\code{transcriptomeWide = TRUE}), a list with 2 slots as follows:
 \itemize{
 \item{tensorNetworks:} A list with the WT weight-averaged denoised gene regulatory network.
-\item{perturbationDistances:} A numeric matrix of manifold-alignment distances with the perturbed genes as rows and all genes in the WT network as columns.
+\item{perturbationDistances:} A numeric matrix of perturbation distances (heat manifold alignment by default, manifold alignment when \code{ma_method = "manifold"}) with the perturbed genes as rows and all genes in the WT network as columns.
+\item{perturbationDirections:} Only when \code{dr_direction = TRUE}: a numeric matrix of the same dimensions with the predicted direction of each gene (1 up, -1 down, 0 undetermined).
 }
 }
 \description{
@@ -120,9 +139,10 @@ output <- scTenifoldKnk(
 # Structure of the output
 str(output)
 
-# Accessing the WT and KO gene regulatory networks
+# Accessing the WT gene regulatory network, and rebuilding the KO network
 dim(output$tensorNetworks$WT)
-dim(output$tensorNetworks$KO)
+KO <- output$tensorNetworks$WT
+KO['ng10', ] <- 0
 
 # Accessing the manifold alignment result
 head(output$manifoldAlignment)
@@ -132,6 +152,18 @@ head(output$diffRegulation, n = 10)
 
 # Plotting the KO-centered subnetwork
 plotKO(output, gKO = "ng10")
+
+# Multi-gene knockout — ng10 and ng20 knocked out together
+dkoOutput <- scTenifoldKnk(
+  countMatrix = X,
+  gKO = c("ng10", "ng20"),
+  nc_nNet = 10,
+  nc_nCells = 500,
+  td_K = 3,
+  qc_minLibSize = 30
+)
+head(dkoOutput$diffRegulation, n = 10)
+plotKO(dkoOutput, gKO = c("ng10", "ng20"))
 
 # Transcriptome-wide perturbation — knock out every gene in the WT network
 twOutput <- scTenifoldKnk(

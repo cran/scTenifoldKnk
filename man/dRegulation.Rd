@@ -5,7 +5,12 @@
 \title{Evaluates gene differential regulation based on manifold alignment
   distances.}
 \usage{
-dRegulation(manifoldOutput, empiricalNull = FALSE)
+dRegulation(
+  manifoldOutput,
+  gKO = NULL,
+  empiricalNull = FALSE,
+  direction = NULL
+)
 }
 \arguments{
 \item{manifoldOutput}{A matrix. The output of the non-linear manifold
@@ -13,14 +18,25 @@ alignment, a labeled matrix with two times the number of shared genes as
 rows (X_ genes followed by Y_ genes in the same order) and \code{d} number
 of columns.}
 
+\item{gKO}{A character vector with the knocked-out genes, or \code{NULL}.
+These genes are perturbed by construction, so they are left out of the
+expectation used to compute the fold-changes; otherwise their large
+distances inflate it and hide the other genes. They are still reported in
+the output. Default: NULL, the expectation is computed from all genes.}
+
 \item{empiricalNull}{A boolean value (TRUE/FALSE). If TRUE, p-values are
 assigned using Efron's empirical null: the null distribution of the
 Z-scores is estimated from the bulk of the data with \code{locfdr::locfdr}
 instead of assuming the theoretical chi-square null. Requires the
 \code{locfdr} package. Default: FALSE.}
+
+\item{direction}{Optional named numeric vector of direction scores (names:
+genes), for example a row of \code{\link{knockoutDirection}}. If given,
+the columns \code{direction} and \code{directionScore} are appended.
+Default: NULL.}
 }
 \value{
-A data frame with 6 columns as follows: \itemize{
+A data frame with 6 columns (8 when \code{direction} is given) as follows: \itemize{
 \item \code{gene} A character vector with the gene id identified from the
   \code{manifoldAlignment} output.
 \item \code{distance} A numeric vector of the Euclidean distance computed
@@ -28,12 +44,17 @@ A data frame with 6 columns as follows: \itemize{
 \item \code{Z} A numeric vector of the Z-scores computed after Box-Cox power
   transformation.
 \item \code{FC} A numeric vector of the FC computed with respect to the
-  expectation.
+  expectation, the mean squared distance of the genes not in \code{gKO}.
 \item \code{p.value} A numeric vector of the p-values associated to the
   fold-changes, probabilities are assigned as \eqn{P[X > x]} using the
   Chi-square distribution with one degree of freedom.
 \item \code{p.adj} A numeric vector of adjusted p-values using Benjamini &
   Hochberg (1995) FDR correction.
+\item \code{direction} Only when \code{direction} is given: \code{"up"} or
+  \code{"down"}, the predicted direction of the change of the gene; the
+  knocked-out genes are \code{"down"} by construction.
+\item \code{directionScore} Only when \code{direction} is given: the
+  signed direction score (\code{NA} for the knocked-out genes).
 }
 }
 \description{
@@ -43,8 +64,14 @@ Using the output of the non-linear manifold alignment, this
   using Box-Cox power transformation, and standardized to ensure normality.
   P-values are assigned following the chi-square distribution over the
   fold-change of the squared distance computed with respect to the
-  expectation, or, when \code{empiricalNull = TRUE}, using Efron's
-  empirical null estimated from the Z-scores with \code{locfdr}.
+  expectation, the mean squared distance of the genes that were not knocked
+  out (\code{gKO}), or, when \code{empiricalNull = TRUE}, using Efron's
+  empirical null estimated from the Z-scores with \code{locfdr}. Genes whose
+  distance is at the level of floating-point noise (at most
+  \code{sqrt(.Machine$double.eps)} times the largest absolute coordinate) did
+  not move between conditions and get a p-value of 1; if this applies to
+  every gene, for example when the knockout leaves the network unchanged, a
+  warning is raised.
 }
 \examples{
 library(scTenifoldKnk)
